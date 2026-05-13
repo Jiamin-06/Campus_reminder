@@ -385,7 +385,7 @@ body {
 
   <!-- 固定格式输出预览 -->
   <div class="output-section" style="margin-top:16px">
-    <div class="output-section-title">📋 固定格式输出预览（点击复制）</div>
+    <div class="output-section-title">📋 今日提醒</div>
     <div class="output-preview" id="widget1Output" onclick="copyToday()"></div>
   </div>
 
@@ -1090,7 +1090,7 @@ function buildFixedOutput() {
   if (warnBalances.length > 0) todoItems.push(`💰${warnBalances.length}个账户余额不足`);
   let todoInfo = todoItems.length > 0 ? todoItems.join('、') : '今日事项已全部完成，继续加油！🎉';
 
-  return `【XX大学·校园全能提醒小助手】\n📅 今日课表：${courseInfo}\n📝 作业倒计时：${hwInfo}\n📚 考试倒计时：${examInfo}\n📦 快递提醒：${expressInfo}\n💰 余额预警：${balanceInfo}\n✅ 今日待办：${todoInfo}`;
+  return `【校园全能提醒小助手】\n📅 今日课表：${courseInfo}\n📝 作业倒计时：${hwInfo}\n📚 考试倒计时：${examInfo}\n📦 快递提醒：${expressInfo}\n💰 余额预警：${balanceInfo}\n✅ 今日待办：${todoInfo}`;
 }
 
 function colorizeOutput(text) {

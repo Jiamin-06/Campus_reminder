@@ -335,12 +335,12 @@ body {
   </div>
 </div>
 
-<!-- 固定格式输出预览 -->
+<!-- 今日提醒 -->
 <div class="card">
-  <div class="card-title">📋 固定格式输出预览（点击复制）</div>
+  <div class="card-title">📋 今日提醒</div>
   <div class="output-preview" id="outputPreview" onclick="copyOutput()"></div>
   <div class="copy-bar" style="margin-top:12px;margin-bottom:0">
-    <span>📋 一键复制今日提醒（固定格式模板）</span>
+    <span>📋 一键复制今日提醒</span>
     <button class="copy-btn" id="copyOutputBtn" onclick="copyOutput()">📋 复制全部</button>
   </div>
 </div>
@@ -378,16 +378,33 @@ body {
 </div>
 
 <script>
-// ========== 演示数据初始化 ==========
+// ========== 数据层：优先从 localStorage 读取用户数据 ==========
+function loadUserData() {
+  try {
+    const saved = localStorage.getItem('campus_assistant_data');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.courses || parsed.homeworks || parsed.exams || parsed.expresses || parsed.balances) {
+        console.log('✅ 已加载用户数据');
+        return parsed;
+      }
+    }
+  } catch(e) {
+    console.warn('localStorage 读取失败，使用演示数据');
+  }
+  return null;
+}
+
 function initDemo() {
   const today = new Date();
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
   const day3 = new Date(today); day3.setDate(day3.getDate() + 3);
   const day7 = new Date(today); day7.setDate(day7.getDate() + 7);
   const day14 = new Date(today); day14.setDate(day14.getDate() + 14);
+  const day21 = new Date(today); day21.setDate(day21.getDate() + 21);
   const fmt = d => d.toISOString().split('T')[0];
 
-  data = {
+  return {
     courses: [
       { name: '高等数学', day: today.getDay() || 7, slot: '第1-2节', room: '教学楼A301' },
       { name: '大学英语', day: today.getDay() || 7, slot: '第3-4节', room: '外语楼B201' },
@@ -425,6 +442,7 @@ let refreshSeconds = 60;
 let timerInterval = null;
 let isPaused = false;
 let refreshCount = 0;
+let isUsingUserData = false;
 
 function togglePause() {
   isPaused = !isPaused;
@@ -490,73 +508,105 @@ function renderTodoList() {
   const list = document.getElementById('todoList');
   const empty = document.getElementById('todoEmpty');
   const today = new Date();
-  const todayStr = fmt2(today);
+  const todayNum = today.getDay() || 7;
   const nowHour = today.getHours();
+
+  // 确保 data 存在
+  const courses = data.courses || [];
+  const homeworks = data.homeworks || [];
+  const exams = data.exams || [];
+  const expresses = data.expresses || [];
+  const balances = data.balances || [];
 
   const items = [];
 
   // 规则1: 课程提醒（1小时内）
-  data.courses.forEach(c => {
-    const slotMap = {
-      '第1-2节': { start: 8, end: 10 },
-      '第3-4节': { start: 10, end: 12 },
-      '第5-6节': { start: 14, end: 16 },
-      '第7-8节': { start: 16, end: 18 },
-      '第9-10节(晚)': { start: 19, end: 21 }
-    };
-    if (c.day === (today.getDay() || 7)) {
-      const slot = slotMap[c.slot] || { start: 8, end: 10 };
-      const within1h = nowHour >= slot.start - 1 && nowHour < slot.end;
-      if (within1h) {
-        items.push({
-          id: `course-${c.name}`,
-          text: `📚 ${c.name}（${c.slot}）`,
-          meta: `${c.room || '待定地点'} · 即将上课`,
-          tag: 'tag-blue',
-          tagText: '⚡ 课前1小时',
-          type: 'course'
-        });
-        pushLogEntry('course', `课程提醒：${c.name}将在${c.slot}上课，地点${c.room || '待定'}`);
-      }
+  const slotMap = {
+    '第1-2节': { start: 8, end: 10 },
+    '第3-4节': { start: 10, end: 12 },
+    '第5-6节': { start: 14, end: 16 },
+    '第7-8节': { start: 16, end: 18 },
+    '第9-10节(晚)': { start: 19, end: 21 }
+  };
+  
+  courses.filter(c => c.day === todayNum).forEach(c => {
+    const slot = slotMap[c.slot] || { start: 8, end: 10 };
+    const within1h = nowHour >= slot.start - 1 && nowHour < slot.end;
+    if (within1h) {
+      items.push({
+        id: `course-${c.name}`,
+        text: `📚 ${c.name}（${c.slot}）`,
+        meta: `${c.room || '待定地点'} · 即将上课`,
+        tag: 'tag-blue',
+        tagText: '⚡ 课前1小时',
+        type: 'course'
+      });
+      pushLogEntry('course', `课程提醒：${c.name}将在${c.slot}上课，地点${c.room || '待定'}`);
+    } else {
+      // 显示今日所有课程
+      items.push({
+        id: `course-${c.name}`,
+        text: `📚 ${c.name}（${c.slot}）`,
+        meta: `${c.room || '待定地点'}`,
+        tag: 'tag-blue',
+        tagText: '📅 今日课程',
+        type: 'course'
+      });
     }
   });
 
-  // 规则2: 作业三级预警
-  data.homeworks.filter(h => !h.done).forEach(h => {
+  // 规则2: 作业提醒（仅限今日截止）
+  homeworks.filter(h => !h.done).forEach(h => {
     const days = diffDays(h.due);
     if (days < 0) {
-      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course}）`, meta: `${formatDate(h.due)}已截止`, tag: 'tag-red', tagText: '⚠️ 已截止', type: 'hw' });
-      pushLogEntry('hw', `作业已截止：${h.name}（${h.course}）`);
+      // 已截止但未完成
+      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course||'待识别'}）`, meta: `${formatDate(h.due)}已截止`, tag: 'tag-red', tagText: '⚠️ 已截止', type: 'hw' });
+      pushLogEntry('hw', `作业已截止：${h.name}（${h.course||'待识别'}）`);
     } else if (days === 0) {
-      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course}）`, meta: '今天截止！', tag: 'tag-red', tagText: '🔴 今天截止', type: 'hw' });
-      pushLogEntry('hw', `紧急：${h.name}（${h.course}）今天截止！`);
-    } else if (days === 1) {
-      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course}）`, meta: '明天截止', tag: 'tag-orange', tagText: '🟡 明天截止', type: 'hw' });
-    } else if (days <= 3) {
-      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course}）`, meta: `${days}天后截止`, tag: 'tag-orange', tagText: `🟡 ${days}天后`, type: 'hw' });
+      // 今日截止
+      items.push({ id: `hw-${h.name}`, text: `📝 ${h.name}（${h.course||'待识别'}）`, meta: '今天截止！', tag: 'tag-red', tagText: '🔴 今天截止', type: 'hw' });
+      pushLogEntry('hw', `紧急：${h.name}（${h.course||'待识别'}）今天截止！`);
     }
+    // 不再显示明天及以后的作业
   });
 
-  // 规则3: 考试倒计时
-  data.exams.forEach(e => {
+  // 规则3: 考试提醒（仅限今日）
+  exams.forEach(e => {
     const days = diffDays(e.date);
-    if (days <= 7 && days >= 0) {
-      const tag = days <= 3 ? 'tag-red' : 'tag-orange';
-      const tagText = days <= 3 ? `🔴 ${days}天后` : `🟡 ${days}天后`;
-      items.push({ id: `exam-${e.name}`, text: `📖 ${e.name}`, meta: `${formatDate(e.date)}开考${e.room?' · '+e.room:''}`, tag, tagText, type: 'exam' });
-      if (days <= 3) pushLogEntry('exam', `考试紧急：${e.name}倒计时${days}天！`);
+    if (days === 0) {
+      // 今日考试
+      items.push({ id: `exam-${e.name}`, text: `📖 ${e.name}`, meta: `今天开考${e.room?' · '+e.room:''}`, tag: 'tag-red', tagText: '🔴 今日考试', type: 'exam' });
+      pushLogEntry('exam', `今日考试：${e.name}！`);
+    } else if (days < 0) {
+      // 已过期的考试
+      items.push({ id: `exam-${e.name}`, text: `📖 ${e.name}`, meta: `${formatDate(e.date)}已结束`, tag: 'tag-orange', tagText: '⚠️ 已结束', type: 'exam' });
     }
   });
 
-  // 规则4: 快递到站提醒
-  data.expresses.forEach(ex => {
+  // 规则4: 快递提醒（仅限今日到站）
+  expresses.forEach(ex => {
     const days = diffDays(ex.date);
-    if (days <= 0) {
-      items.push({ id: `ex-${ex.no}`, text: `📦 ${ex.type} ${ex.no}`, meta: `可取件 · ${ex.loc || '菜鸟驿站'}`, tag: 'tag-red', tagText: '🔴 可取件', type: 'express' });
+    if (days === 0) {
+      // 今日到站
+      items.push({ id: `ex-${ex.no}`, text: `📦 ${ex.type||'快递'} ${ex.no||''}`, meta: `今天到站 · ${ex.loc || '菜鸟驿站'}`, tag: 'tag-red', tagText: '🔴 今日到站', type: 'express' });
       if (!ex.arrived) {
-        pushLogEntry('express', `快递可取：${ex.type} ${ex.no}，地点${ex.loc || '菜鸟驿站'}`);
+        pushLogEntry('express', `快递今日到站：${ex.type||'快递'} ${ex.no||''}，地点${ex.loc || '菜鸟驿站'}`);
         ex.arrived = true;
       }
+    } else if (days < 0) {
+      // 已过期未取
+      items.push({ id: `ex-${ex.no}`, text: `📦 ${ex.type||'快递'} ${ex.no||''}`, meta: `${formatDate(ex.date)}到站 · ${ex.loc || '菜鸟驿站'}`, tag: 'tag-orange', tagText: '⚠️ 未取', type: 'express' });
+      if (!ex.arrived) {
+        pushLogEntry('express', `快递滞留提醒：${ex.type||'快递'} ${ex.no||''}，请尽快取件`);
+        ex.arrived = true;
+      }
+    }
+  });
+
+  // 规则5: 余额预警
+  balances.forEach(b => {
+    if (b.amount <= b.threshold) {
+      items.push({ id: `bal-${b.type}`, text: `💰 ${b.type}余额不足`, meta: `当前¥${b.amount} · 低于¥${b.threshold}预警线`, tag: 'tag-red', tagText: '⚠️ 需要充值', type: 'balance' });
     }
   });
 
@@ -598,11 +648,18 @@ function fmt2(d) {
 function renderRules() {
   const today = new Date().getDay() || 7;
   const nowHour = new Date().getHours();
-  const todayCourses = data.courses.filter(c => c.day === today);
-  const urgentHw = data.homeworks.filter(h => diffDays(h.due) >= 0 && diffDays(h.due) <= 3 && !h.done);
-  const urgentExams = data.exams.filter(e => diffDays(e.date) >= 0 && diffDays(e.date) <= 7);
-  const readyExpress = data.expresses.filter(ex => diffDays(ex.date) <= 0);
-  const lowBalance = data.balances.filter(b => b.amount <= b.threshold);
+  
+  const courses = data.courses || [];
+  const homeworks = data.homeworks || [];
+  const exams = data.exams || [];
+  const expresses = data.expresses || [];
+  const balances = data.balances || [];
+  
+  const todayCourses = courses.filter(c => c.day === today);
+  const urgentHw = homeworks.filter(h => diffDays(h.due) >= 0 && diffDays(h.due) <= 3 && !h.done);
+  const urgentExams = exams.filter(e => diffDays(e.date) >= 0 && diffDays(e.date) <= 7);
+  const readyExpress = expresses.filter(ex => diffDays(ex.date) <= 0);
+  const lowBalance = balances.filter(b => b.amount <= b.threshold);
 
   const rules = [
     { icon: '📚', title: '课程表提醒', sub: `今日${todayCourses.length}节课，课前1小时推送`, fired: todayCourses.length > 0 },
@@ -628,7 +685,8 @@ function renderRules() {
 // ========== 余额预警横幅 ==========
 function renderBanner() {
   const area = document.getElementById('bannerArea');
-  const lowBalance = data.balances.filter(b => b.amount <= b.threshold);
+  const balances = data.balances || [];
+  const lowBalance = balances.filter(b => b.amount <= b.threshold);
   if (lowBalance.length === 0) {
     area.innerHTML = '';
     return;
@@ -658,67 +716,89 @@ function buildFixedOutput() {
   const todayNum = today.getDay() || 7;
   const dayNames = ['周日','周一','周二','周三','周四','周五','周六'];
   const nowHour = today.getHours();
-  const todayCourses = data.courses.filter(c => c.day === todayNum);
-  const urgentHw = data.homeworks.filter(h => diffDays(h.due) >= 0).sort((a,b) => diffDays(a.due) - diffDays(b.due));
-  const urgentExams = data.exams.filter(e => diffDays(e.date) >= 0).sort((a,b) => diffDays(a.date) - diffDays(b.date));
-  const readyExpress = data.expresses.filter(ex => diffDays(ex.date) <= 0);
-  const lowBalance = data.balances.filter(b => b.amount <= b.threshold);
+  
+  // 确保 data 存在且有数组属性
+  const courses = data.courses || [];
+  const homeworks = data.homeworks || [];
+  const exams = data.exams || [];
+  const expresses = data.expresses || [];
+  const balances = data.balances || [];
 
-  // 今日课表
+  const todayCourses = courses.filter(c => c.day === todayNum);
+  const urgentHw = homeworks.filter(h => diffDays(h.due) >= 0 && !h.done).sort((a,b) => diffDays(a.due) - diffDays(b.due));
+  const urgentExams = exams.filter(e => diffDays(e.date) >= 0).sort((a,b) => diffDays(a.date) - diffDays(b.date));
+  const readyExpress = expresses.filter(ex => diffDays(ex.date) <= 0);
+  const upcomingExpress = expresses.filter(ex => diffDays(ex.date) > 0).sort((a,b) => diffDays(a.date) - diffDays(b.date));
+  const lowBalance = balances.filter(b => b.amount <= b.threshold);
+
+  // 📅 今日课表
   let courseInfo = '今日无课';
   if (todayCourses.length > 0) {
     const slotMap = {
       '第1-2节': '08:00-09:40', '第3-4节': '10:00-11:40',
       '第5-6节': '14:00-15:40', '第7-8节': '16:00-17:40', '第9-10节(晚)': '19:00-20:40'
     };
-    courseInfo = todayCourses.map(c => `${c.name}(${slotMap[c.slot]||c.slot})`).join('、');
+    courseInfo = todayCourses.map(c => `${c.name}(${slotMap[c.slot]||c.slot})${c.room?' '+c.room:''}`).join('、');
   }
 
-  // 作业倒计时
+  // 📝 作业倒计时
   let hwInfo = '暂无待完成作业';
   if (urgentHw.length > 0) {
     hwInfo = urgentHw.slice(0, 5).map(h => {
       const days = diffDays(h.due);
-      const tag = days <= 0 ? '⚠️已到期' : days === 1 ? '🔴明天截止' : days <= 3 ? `🟡${days}天后截止` : `🟢${days}天后截止`;
-      return `${h.name}（${h.course}）${tag}`;
+      const tag = days <= 0 ? '⚠️已到期' : days === 1 ? '🔴明天截止' : days <= 3 ? `🟡${days}天后` : `🟢${days}天后`;
+      return `${h.name}（${h.course||'待识别'}）${tag}`;
     }).join('；');
   }
 
-  // 考试倒计时
+  // 📚 考试倒计时
   let examInfo = '暂无近期考试';
   if (urgentExams.length > 0) {
     examInfo = urgentExams.slice(0, 3).map(e => `${e.name}倒计时${diffDays(e.date)}天`).join('；');
   }
 
-  // 快递
+  // 📦 快递提醒
   let expressInfo = '暂无待取快递';
   if (readyExpress.length > 0) {
-    expressInfo = readyExpress.map(ex => `${ex.type}(${ex.no})在${ex.loc||'菜鸟驿站'}可取`).join('；');
-  } else {
-    const upcoming = data.expresses.filter(ex => diffDays(ex.date) > 0).sort((a,b) => diffDays(a.date) - diffDays(b.date));
-    if (upcoming.length > 0) {
-      const next = upcoming[0];
-      expressInfo = `${next.type}(${next.no})预计${diffDays(next.date)}天后到达`;
+    expressInfo = readyExpress.map(ex => `${ex.type||'快递'}(${ex.no||''})在${ex.loc||'菜鸟驿站'}可取`).join('；');
+  } else if (upcomingExpress.length > 0) {
+    const next = upcomingExpress[0];
+    expressInfo = `${next.type||'快递'}(${next.no||''})预计${diffDays(next.date)}天后到达`;
+  }
+
+  // 💰 余额预警
+  let balanceInfo = '余额充足，无预警';
+  if (balances.length > 0) {
+    if (lowBalance.length > 0) {
+      balanceInfo = lowBalance.map(b => `⚠️${b.type}余额¥${b.amount}（低于¥${b.threshold}预警线）`).join('；');
+    } else {
+      const all = balances.map(b => `${b.type}¥${b.amount}`).join('、');
+      balanceInfo = `当前余额：${all}，均高于预警线`;
     }
   }
 
-  // 余额
-  let balanceInfo = '余额充足，无预警';
-  if (lowBalance.length > 0) {
-    balanceInfo = lowBalance.map(b => `⚠️${b.type}余额¥${b.amount}（低于¥${b.threshold}预警线）`).join('；');
-  }
-
-  // 今日待办汇总
+  // ✅ 今日待办汇总
   const todos = [];
-  if (todayCourses.length > 0) todos.push(`${todayCourses.length}节课程`);
-  const todayHw = urgentHw.filter(h => diffDays(h.due) === 0);
-  if (todayHw.length > 0) todos.push(`⚠️${todayHw.length}项作业今日截止`);
-  if (readyExpress.length > 0) todos.push(`📦${readyExpress.length}件快递可取`);
-  if (lowBalance.length > 0) todos.push(`💰${lowBalance.length}个账户余额不足`);
-  if (todoDone.length > 0) todos.push(`✅已办${todoDone.length}项`);
-  const todoInfo = todos.length > 0 ? todos.join('、') : '今日事项已全部完成，继续加油！🎉';
+  if (todayCourses.length > 0) {
+    todayCourses.forEach(c => todos.push(`📚 ${c.name}（${c.slot}）`));
+  }
+  const todayHw = urgentHw.filter(h => diffDays(h.due) <= 0);
+  if (todayHw.length > 0) {
+    todos.push(`⚠️ ${todayHw.length}项作业${diffDays(todayHw[0].due) <= 0 ? '今日' : '紧急'}截止`);
+  }
+  if (readyExpress.length > 0) {
+    todos.push(`📦 ${readyExpress.length}件快递可取`);
+  }
+  if (lowBalance.length > 0) {
+    todos.push(`💰 ${lowBalance.length}个账户余额不足`);
+  }
+  const todoDoneItems = todoDone.filter(id => id.startsWith('done-'));
+  if (todoDoneItems.length > 0) {
+    todos.push(`✅ 已完成${todoDoneItems.length}项`);
+  }
+  const todoInfo = todos.length > 0 ? todos.join('、') : '🎉 今日事项已全部完成，继续加油！';
 
-  return `【XX大学·校园全能提醒小助手】
+  return `【校园全能提醒小助手】
 📅 今日课表：${courseInfo}
 📝 作业倒计时：${hwInfo}
 📚 考试倒计时：${examInfo}
@@ -774,9 +854,40 @@ function startLoop() {
 }
 
 // ========== 启动 ==========
-initDemo();
-renderLog();
-startLoop();
+function startup() {
+  // 优先从 localStorage 读取用户在 Widget1/Widget2 输入的数据
+  const userData = loadUserData();
+  if (userData) {
+    data = userData;
+    isUsingUserData = true;
+    document.querySelector('.header p').textContent = '📥 已加载用户数据 · 6大规则自动运行中';
+  } else {
+    data = initDemo();
+    isUsingUserData = false;
+    document.querySelector('.header p').textContent = '📝 演示数据模式 · 请到主助手录入真实数据';
+  }
+  renderLog();
+  startLoop();
+}
+startup();
+
+// 每30秒检查一次 localStorage 更新（保持与 Widget1/Widget2 同步）
+setInterval(() => {
+  if (!isPaused) {
+    const userData = loadUserData();
+    if (userData && !isUsingUserData) {
+      // 检测到新数据，提示用户
+      data = userData;
+      isUsingUserData = true;
+      document.querySelector('.header p').textContent = '📥 已加载用户数据 · 6大规则自动运行中';
+      run();
+    } else if (userData && isUsingUserData) {
+      // 同步最新数据
+      data = userData;
+      run();
+    }
+  }
+}, 30000);
 </script>
 </body>
 </html>

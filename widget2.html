@@ -293,6 +293,93 @@ textarea::placeholder { color: #B0BEC5; }
   margin-bottom: 16px;
 }
 .step-indicator strong { color: var(--color-accent); }
+
+/* 图片识别区域 */
+.img-upload-area {
+  border: 2px dashed #CBD5E1;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  margin-bottom: 16px;
+  transition: all 0.3s;
+  cursor: pointer;
+}
+.img-upload-area:hover { border-color: var(--color-primary); background: #F8FAFF; }
+.img-upload-area.dragover { border-color: var(--color-primary); background: #E8F4FD; }
+.img-upload-icon { font-size: 40px; margin-bottom: 8px; }
+.img-upload-text { font-size: 14px; color: var(--color-text); font-weight: 600; }
+.img-upload-sub { font-size: 12px; color: var(--color-text-light); margin-top: 4px; }
+.img-preview-container { margin-bottom: 16px; display: none; }
+.img-preview {
+  max-width: 100%;
+  max-height: 250px;
+  border-radius: 12px;
+  display: block;
+  margin: 0 auto;
+}
+.img-preview-actions { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+.img-ocr-btn {
+  padding: 8px 16px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.img-ocr-btn:hover { background: #3A7BC8; }
+.img-ocr-btn:disabled { background: #CBD5E1; cursor: not-allowed; }
+.img-clear-btn {
+  padding: 8px 16px;
+  background: #F0F0F0;
+  color: var(--color-text);
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.img-clear-btn:hover { background: #E0E0E0; }
+.ocr-result-box {
+  background: #FAFBFC;
+  border: 2px solid var(--color-success);
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 12px;
+  display: none;
+}
+.ocr-result-title { font-size: 13px; font-weight: 700; color: var(--color-success); margin-bottom: 8px; }
+.ocr-result-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.ocr-loading {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  color: var(--color-primary);
+  font-weight: 600;
+}
+.ocr-spinner {
+  width: 20px; height: 20px;
+  border: 3px solid #E2E8F0;
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -331,8 +418,46 @@ textarea::placeholder { color: #B0BEC5; }
 
 <!-- 步骤1：课程表 -->
 <div class="card" id="stepCard1">
-  <div class="card-title">📚 第1步：粘贴本周课程表</div>
-  <div class="card-desc">直接复制文字版课表粘贴进来，支持：课程名+时间+地点自动识别</div>
+  <div class="card-title">📚 第1步：导入本周课程表</div>
+  <div class="card-desc">方式一：上传课表图片，AI自动识别 | 方式二：直接粘贴文字</div>
+
+  <!-- 图片上传区域 -->
+  <div class="img-upload-area" id="imgUploadArea" onclick="document.getElementById('imgFileInput').click()">
+    <div class="img-upload-icon">📷</div>
+    <div class="img-upload-text">点击上传课表图片</div>
+    <div class="img-upload-sub">支持 JPG/PNG/GIF，截图或拍照皆可</div>
+  </div>
+  <input type="file" id="imgFileInput" accept="image/*" style="display:none" onchange="handleImgSelect(this)">
+
+  <!-- 图片预览 -->
+  <div class="img-preview-container" id="imgPreviewContainer">
+    <img class="img-preview" id="imgPreview" alt="课表预览">
+    <div class="img-preview-actions">
+      <button class="img-ocr-btn" id="ocrBtn" onclick="startOCR()">
+        🤖 AI 识别课程
+      </button>
+      <button class="img-clear-btn" onclick="clearImg()">✕ 清除</button>
+    </div>
+  </div>
+
+  <!-- OCR加载中 -->
+  <div class="ocr-loading" id="ocrLoading">
+    <div class="ocr-spinner"></div>
+    <span>AI 正在识别课表...</span>
+  </div>
+
+  <!-- OCR识别结果 -->
+  <div class="ocr-result-box" id="ocrResultBox">
+    <div class="ocr-result-title">✅ 识别结果（已自动填入）</div>
+    <div class="ocr-result-content" id="ocrResultContent"></div>
+  </div>
+
+  <!-- 分隔线 -->
+  <div style="text-align:center;margin:20px 0;color:var(--color-text-light);font-size:12px">
+    — 或者手动输入 —
+  </div>
+
+  <!-- 文字输入 -->
   <textarea id="input1" placeholder="示例：
 周一 高数 1-2节 教学楼A301
 周三 大学英语 3-4节 外语楼B201
@@ -340,7 +465,7 @@ textarea::placeholder { color: #B0BEC5; }
   <div class="tip-box">💡 <strong>提示：</strong>支持多种格式，如"周一 高数A301"、"星期三 体育课 第3-4节"，自动识别！</div>
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="skipStep(1)">跳过</button>
-    <button class="btn btn-accent" onclick="parseStep1()">🤖 AI 解析</button>
+    <button class="btn btn-accent" onclick="parseStep1()">🤖 解析文字</button>
   </div>
   <div class="parse-result" id="result1"></div>
 </div>
@@ -733,6 +858,98 @@ function renderParseResult(targetId, results, emptyMsg) {
   }).join('');
 }
 
+// ========== 图片处理 ==========
+let currentImgFile = null;
+
+function handleImgSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  currentImgFile = file;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    document.getElementById('imgPreview').src = e.target.result;
+    document.getElementById('imgPreviewContainer').style.display = 'block';
+    document.getElementById('ocrResultBox').style.display = 'none';
+    document.getElementById('ocrLoading').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearImg() {
+  currentImgFile = null;
+  document.getElementById('imgFileInput').value = '';
+  document.getElementById('imgPreviewContainer').style.display = 'none';
+  document.getElementById('ocrResultBox').style.display = 'none';
+  document.getElementById('ocrLoading').style.display = 'none';
+}
+
+async function startOCR() {
+  if (!currentImgFile) return;
+
+  const loadingEl = document.getElementById('ocrLoading');
+  const resultBox = document.getElementById('ocrResultBox');
+  const resultContent = document.getElementById('ocrResultContent');
+  const ocrBtn = document.getElementById('ocrBtn');
+
+  loadingEl.style.display = 'flex';
+  resultBox.style.display = 'none';
+  ocrBtn.disabled = true;
+  ocrBtn.innerHTML = '⏳ 识别中...';
+
+  try {
+    // 动态加载Tesseract.js
+    if (typeof Tesseract === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      document.head.appendChild(script);
+      await new Promise((resolve, reject) => {
+        script.onload = resolve;
+        script.onerror = reject;
+        setTimeout(reject, 30000); // 30秒超时
+      });
+    }
+
+    const result = await Tesseract.recognize(currentImgFile, 'eng+chi', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          ocrBtn.innerHTML = `⏳ 识别中 ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    });
+
+    const recognizedText = result.data.text.trim();
+    resultContent.textContent = recognizedText;
+
+    // 将识别结果填入文本框
+    document.getElementById('input1').value = recognizedText;
+
+    // 解析识别的课程
+    const courses = parseCourses(recognizedText);
+    if (courses.length > 0) {
+      parsed.courses = courses;
+      resultContent.textContent = recognizedText + '\n\n✅ 已自动解析 ' + courses.length + ' 条课程信息！';
+    }
+
+    loadingEl.style.display = 'none';
+    resultBox.style.display = 'block';
+    ocrBtn.innerHTML = '🤖 AI 识别课程';
+
+    // 自动继续解析
+    setTimeout(() => {
+      parseStep1();
+    }, 1500);
+
+  } catch (error) {
+    console.error('OCR Error:', error);
+    loadingEl.style.display = 'none';
+    resultBox.style.display = 'block';
+    resultContent.textContent = '❌ 识别失败，请尝试：\n1. 确保图片清晰\n2. 尝试截图课表主体部分\n3. 或直接手动输入课程信息';
+  }
+
+  ocrBtn.disabled = false;
+}
+
 // ========== 各步骤处理 ==========
 function parseStep1() {
   const text = document.getElementById('input1').value;
@@ -888,7 +1105,7 @@ function buildFixedOutput() {
   if (warnB.length > 0) todoItems.push(`💰${warnB.length}个账户余额不足`);
   const todoInfo = todoItems.length > 0 ? todoItems.join('、') : '今日事项已全部完成，继续加油！🎉';
 
-  return `【XX大学·校园全能提醒小助手】\n📅 今日课表：${courseInfo}\n📝 作业倒计时：${hwInfo}\n📚 考试倒计时：${examInfo}\n📦 快递提醒：${expressInfo}\n💰 余额预警：${balanceInfo}\n✅ 今日待办：${todoInfo}`;
+  return `【校园全能提醒小助手】\n📅 今日课表：${courseInfo}\n📝 作业倒计时：${hwInfo}\n📚 考试倒计时：${examInfo}\n📦 快递提醒：${expressInfo}\n💰 余额预警：${balanceInfo}\n✅ 今日待办：${todoInfo}`;
 }
 
 function copySummary() {
